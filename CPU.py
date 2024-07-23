@@ -1,44 +1,54 @@
-from cache import Cache
+from memory import Memory
+from processor import Processor
 
 class CPU:
-    def __init__(self, id, cache_size, cache_controller):
-        self.id = id
-        self.cache = Cache(cache_size)
-        self.cache_controller = cache_controller
-        self.cache_controller.register_cache(self.cache)
 
-    def read_data(self, memory, address):
-        data, state = self.cache.read_from_cache(address)
-        if data is not None:
-            print(f"Processador {self.id}: Read Hit (RH) - Estado: {state}")
-            return data
-        else:
-            print(f"Processador {self.id}: Read Miss (RM)")
-            line = self.cache_controller.read(self.id, address)
-            if line:
-                print(f"Processador {self.id}: Dado presente na cache de outro processador.")
-                data = line.data
-                self.cache.load_data_to_cache(address, data).state = 'S'
+    #Class which maintains the Processing Unit of the four cores.
+
+    def __init__(self):
+
+        self.memory = Memory() #instance of the sharedMemory class
+
+        # self.bus = Bus(self.memory)
+
+        self.processors = {}
+        for processor_number in range(4):
+            self.processors= Processor(processor_number, self.bus, self.memory)
+
+    def printStatus(self):
+
+        print("Main Memory : ")
+        print(self.bus.memory.data)
+        print(" ")
+
+        if(self.bus.instruction_processor != None):
+
+            if(str(self.bus.instruction_type) == "reads"):
+
+                print("Instruction -> Processor_" + str(self.bus.instruction_processor) + " " +
+                      str(self.bus.instruction_type) + " from address:" + str(self.bus.instruction_address))
             else:
-                data = memory.read(address)
-                self.cache.load_data_to_cache(address, data)
-            return data
+                print("Instruction -> Processor_" + str(self.bus.instruction_processor) + " " +
+                  str(self.bus.instruction_type) + " " + "value:" + str(
+                self.bus.instruction_value) + " to address:" + str(self.bus.instruction_address))
 
-    def write_data(self, memory, address, data):
-        line = self.cache.write_to_cache(address, data)
-        if line:
-            if line.state == 'S':
-                print(f"Processador {self.id}: Write Hit (WH) - Estado: {line.state}")
-                self.cache_controller.write(self.id, address)
-                line.state = 'M'
-            elif line.state == 'E':
-                print(f"Processador {self.id}: Write Hit (WH) - Estado: {line.state}")
-                line.state = 'M'
-            elif line.state == 'M':
-                print(f"Processador {self.id}: Write Hit (WH) - Estado: {line.state}")
-            return
-        else:
-            print(f"Processador {self.id}: Write Miss (WM)")
-            self.cache_controller.write(self.id, address)
-            memory.write(address, data)
-            self.cache.load_data_to_cache(address, data).state = 'M'
+        print(" ")
+
+        for processor in range(len(self.bus.processors)):
+            print("Processor number: "+str(processor))
+            print("Cache State: " + self.bus.processors[processor].cache.state)
+
+
+            if(self.bus.processors[processor].cache.address == None):
+                print("Cache memory address: " + "empty")
+            else:
+                print("Cache memory address: " + str(self.bus.processors[processor].cache.address))
+
+            if (self.bus.processors[processor].cache.value == None):
+                print("Cache memory value: " + "empty")
+            else:
+                print("Cache memory value: " + str(self.bus.processors[processor].cache.value))
+
+            print(" ")
+
+        print("*******************************************************************************")
