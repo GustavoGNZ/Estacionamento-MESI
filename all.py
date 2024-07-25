@@ -50,46 +50,47 @@ class Cache:
                 return line
         return None
 
-
     def write(self, endereco, data, state):
         line = self.search(endereco)
         if line:
-            line.update(endereco, data, state)
+            # Write Hit (WH)
+            if line.state == State.SHARED:
+                line.update(endereco, data, State.MODIFIED)
+                return "WH"
+            elif line.state == State.EXCLUSIVE or line.state == State.MODIFIED:
+                line.update(endereco, data, State.MODIFIED)
+                return "WH"
         else:
+            # Write Miss (WM)
             line = self.search(None)
             if line:
-                 # Filtra apenas as linhas vazias
                 empty_lines = [l for l in self.lines if l.endereco is None]
                 if empty_lines:
-                    # Escolhe uma linha vazia aleatoriamente
                     line = random.choice(empty_lines)
                     line.update(endereco, data, state)
                     self.fifoQueue.append(self.lines.index(line))
+                    return "WM"
             elif self.is_full():
-                # fifo replacement
-                # fifo replacement
                 index = self.fifoQueue.pop(0)
                 line_to_remove = self.lines[index]
                 endereco_to_remove = line_to_remove.endereco
                 data_to_remove = line_to_remove.data
                 self.lines[index] = CacheLine()
                 self.write(endereco, data, state)
-
-                return endereco_to_remove, data_to_remove
-        return None
+                return "WM"
 
     def read(self, endereco, memory, cache_manager, processor_id):
         line = self.search(endereco)
         if line and line.state != State.INVALID:
-            if line.state == State.EXCLUSIVE:
-                cache_manager.update_state_to_shared(endereco, processor_id)
-            return line.data
+            # Read Hit (RH)
+            return line.data, "RH"
         else:
+            # Read Miss (RM)
             data = memory.read(endereco)
             is_shared = cache_manager.is_shared(endereco, processor_id)
             new_state = State.SHARED if is_shared else State.EXCLUSIVE
             self.write(endereco, data, new_state)
-            return data
+            return data, "RM"
 
     def update_state(self, endereco, new_state):
         line = self.search(endereco)
@@ -105,7 +106,6 @@ class Cache:
 
     def is_full(self):
         return len(self.lines) >= self.size
-            
 
 class CacheManager:
     def __init__(self):
@@ -138,25 +138,32 @@ class CacheManager:
                     line.state = State.SHARED
 
     def handle_read(self, processor_id, endereco, memory):
-
         for pid, cache in self.caches.items():
             line = cache.search(endereco)
             if line and line.state != State.INVALID:
-                if line.state == State.EXCLUSIVE:
+                if line.state == State.MODIFIED and pid != processor_id:
+                    # Write the modified data to memory
+                    memory.write(endereco, line.data)
+                    # Update the state to shared
+                    self.update_state_to_shared(endereco, processor_id)
+                    # Write the data to the requesting processor's cache
+                    self.caches[processor_id].write(endereco, line.data, State.SHARED)
+                    # Update the responding cache's state to shared
+                    line.state = State.SHARED
+                    return line.data, "RH"
+                if line.state == State.EXCLUSIVE and pid != processor_id:
                     self.update_state_to_shared(endereco, processor_id)
                     self.caches[processor_id].write(endereco, line.data, State.SHARED)
-                return line.data
-            else:
-                data = cache.read(endereco, memory, self, processor_id)
-                return data
+                    return line.data, "RH"
+        # If no cache has the data, read from memory
+        data, transacao = self.caches[processor_id].read(endereco, memory, self, processor_id)
+        return data, transacao
 
     def handle_write(self, processor_id, endereco, data, memory):
         self.invalidate_other_caches(endereco, processor_id)
         cache = self.get_cache(processor_id)
-        result = cache.write(endereco, data, State.MODIFIED)
-        if result != None:
-            endereco_to_add, data_to_add = result
-            memory.write(endereco_to_add, data_to_add)
+        transacao = cache.write(endereco, data, State.MODIFIED)
+        return transacao
 
 class Processador:
     def __init__(self, id, cache_size, memory, cache_manager):
@@ -167,19 +174,68 @@ class Processador:
         cache_manager.register_cache(self.id, self.cache)
 
     def ler(self, endereco):
-        data = self.cache_manager.handle_read(self.id, endereco, self.memory)
-        print(f"Processador {self.id} lê o endereço {endereco} com dado {data}")
+        data, transacao = self.cache_manager.handle_read(self.id, endereco, self.memory)
+        print(f"Processador {self.id} lê o endereço {endereco} com dado {data} ({transacao})\n")
         return data
 
     def escrever(self, endereco, valor):
-        self.cache_manager.handle_write(self.id, endereco, valor, self.memory)
-        print(f"Processador {self.id} escreve o valor {valor} de endereço {endereco}")
+        transacao = self.cache_manager.handle_write(self.id, endereco, valor, self.memory)
+        print(f"Processador {self.id} escreve o valor {valor} no endereço {endereco} ({transacao})\n")
 
     def print_cache(self):
         self.cache.print_cache(self.id)
 
+
+def memoTamanho():
+    tamanho = int(input("Digite o tamanho da memória (minimo 50): "))
+    if tamanho < 50:
+        print("Tamanho inválido, digite novamente")
+        memoTamanho()
+    return tamanho
+
+def cacheTamanho():
+    tamanho = int(input("Digite o tamanho da cache (minimo 5): "))
+    if tamanho < 5:
+        print("Tamanho inválido, digite novamente")
+        cacheTamanho()
+    return tamanho
+
+
+def test_read_write(processors):
+    # Teste de leitura e escrita
+    
+    # Processador 1 lê endereço 0 (Read Miss - RM)
+    processors[0].ler(0)
+    processors[0].print_cache()
+
+    # Processador 1 lê endereço 0 novamente (Read Hit - RH)
+    processors[0].ler(0)
+    processors[0].print_cache()
+
+    # Processador 2 lê endereço 0 (Read Miss - RM, mas estado deve mudar para SHARED)
+    processors[1].ler(0)
+    processors[0].print_cache() 
+    processors[1].print_cache()
+
+    # Processador 2 escreve no endereço 2 (Write Miss - WM)
+    processors[1].escrever(2, 8765)
+    processors[1].print_cache()
+
+    # Processador 3 lê endereço 2 (Read Miss - RM, mas estado deve mudar para SHARED)
+    processors[2].ler(2)
+    processors[2].print_cache()
+
+    # Processador 1 lê endereço 2 (Read Hit - RH, pois está compartilhado)
+    processors[0].ler(2)
+    processors[0].print_cache()
+
+
 def main():
-    memory = Memory(10)
+
+    # tamanho_memoria = memoTamanho()
+    # tamanho_cache = cacheTamanho()
+    
+    memory = Memory(5)
     cache_manager = CacheManager()
 
     # Inicializa os processadores
@@ -187,25 +243,19 @@ def main():
     processor2 = Processador(2, 4, memory, cache_manager)
     processor3 = Processador(3, 4, memory, cache_manager)
 
+    processors = [processor1, processor2, processor3]
+
     memory.print_memory()
-    processor1.print_cache()
 
-    processor1.escrever(0, 1111)
-    processor1.escrever(1, 2222)
-    processor1.escrever(3, 4444)
-    processor1.escrever(2, 3333)
+    test_read_write(processors)
 
-    processor1.print_cache()
-    # processor1.escrever(3, 4444)
-    processor1.escrever(6, 5555) 
-
-    processor1.print_cache()
-
-    processor1.escrever(7, 6666)   
+    memory.print_memory()
 
     # Imprime a memória principal e o estado das caches
-    memory.print_memory()
-    processor1.print_cache()
+    # memory.print_memory()
+    for p in processors:
+        p.print_cache()
+
 
 if __name__ == "__main__":
     main()
