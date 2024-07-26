@@ -82,8 +82,10 @@ class Cache:
         print()
 
     def is_full(self):
-        return len(self.lines) >= self.size
-
+        for line in self.lines:
+            if line.address is None:
+                return False
+        return True
 class Memory:
     def __init__(self, size):
         self.size = size
@@ -137,12 +139,15 @@ class CacheManager:
             line = cache.search(address)
             if line and line.state != State.INVALID:
                 if line.state == State.MODIFIED and pid != processor_id:
-                    memory.write(address, line.data)
+                    if self.caches[processor_id].is_full():
+                        memory.write(address, line.data)
                     self.update_state_to_shared(address, processor_id)
                     self.caches[processor_id].write(address, line.data, State.SHARED)
                     line.state = State.SHARED
                     return line.data, "RH"
                 if line.state == State.EXCLUSIVE and pid != processor_id:
+                    if self.caches[processor_id].is_full():
+                        memory.write(address, line.data)
                     self.update_state_to_shared(address, processor_id)
                     self.caches[processor_id].write(address, line.data, State.SHARED)
                     return line.data, "RH"
@@ -295,9 +300,9 @@ class ParkingManager:
         self.cache_manager.handle_write(processor_id, slot_address, 0, self.cache_manager.memory)
         slot.occupied_by = None
 
-    def check_slot(self, processor_id, slot_id):
+    def check_slot(self, processor_id, slot_id, memory):
         slot_address = slot_id
-        car_id, transaction = self.cache_manager.handle_read(processor_id, slot_address, self.parking_lot)
+        car_id, transaction = self.cache_manager.handle_read(processor_id, slot_address, memory)
         status = f"Ocupada por Carro {car_id}" if car_id else "Vaga Livre"
         print(f"Processador {processor_id} consulta Vaga {slot_id}: {status} ({transaction})")
     
@@ -346,15 +351,19 @@ def test():
     parking_lot.print_slots()
 
     parking_manager.park_car(1, 101, 1)
-    parking_manager.park_car(1, 102, 2)
-    parking_manager.park_car(1, 103, 3)    
-    parking_manager.park_car(1, 104, 4)
+    parking_manager.park_car(2,102,2)
+    parking_manager.park_car(3,103,3)
+    parking_manager.check_slot(1, 2,memory)
+    parking_manager.check_slot(1, 10,memory)
+    # parking_manager.park_car(1, 102, 2)
+    # parking_manager.park_car(1, 103, 3)    
+    # parking_manager.park_car(1, 104, 4)
     processor1.print_cache()
     memory.print_memory()
     # parking_manager.move_car(1, 101, 9)
-    parking_manager.park_car(1, 105, 5)
-    parking_manager.remove_car(1, 1)
-    parking_manager.park_car(2, 222,1)
+    # parking_manager.park_car(1, 105, 5)
+    # parking_manager.remove_car(1, 1)
+    # parking_manager.park_car(2, 222,1)
 
 
     for p in processors:
