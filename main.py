@@ -18,8 +18,9 @@ class CacheLine:
         self.data = data
         self.state = state
 
-    def print_line(self):
-        print(f"Endereço = {self.address}, Dado = {self.data}, Estado = {self.state}")
+    def print_line(self, line_index):
+        state = self.state.value if self.state else "N/A"
+        print(f"Linha {line_index}: Endereço = {self.address}, Dado = {self.data}, Estado = {state}")
 
 class Cache:
     def __init__(self, size):
@@ -28,46 +29,52 @@ class Cache:
         self.fifoQueue = []
 
     def search(self, address):
-        for line in self.lines:
-            if line.address == address:
-                return line
-        return None
+        return next((line for line in self.lines if line.address == address), None)
 
     def write(self, address, data, state):
         line = self.search(address)
         if line:
-            if line.state in [State.SHARED, State.MODIFIED, State.EXCLUSIVE]:
-                line.update(address, data, State.MODIFIED)
-                return "WH", None, None
-        else:
-            line = self.search(None)
-            if line:
-                empty_lines = [l for l in self.lines if l.address is None]
-                if empty_lines:
-                    line = random.choice(empty_lines)
-                    line.update(address, data, state)
-                    self.fifoQueue.append(self.lines.index(line))
-                    return "WM", None, None
-            elif self.is_full():
-                index = self.fifoQueue.pop(0)
-                line_to_remove = self.lines[index]
-                address_to_remove = line_to_remove.address
-                data_to_remove = line_to_remove.data
-                self.lines[index] = CacheLine()
-                self.write(address, data, state)
-                return "WM", address_to_remove, data_to_remove
+            return self.update_existing_line(line, address, data)
+        return self.add_or_replace_line(address, data, state)
+
+    def update_existing_line(self, line, address, data):
+        if line.state in [State.SHARED, State.MODIFIED, State.EXCLUSIVE]:
+            line.update(address, data, State.MODIFIED)
+            return "WH", None, None
+
+    def add_or_replace_line(self, address, data, state):
+        line = self.search(None)
+        if line:
+            self.add_to_cache(line, address, data, state)
+            return "WM", None, None
+        if self.is_full():
+            return self.replace_line_in_cache(address, data, state)
         return "WM", None, None
+
+    def add_to_cache(self, line, address, data, state):
+        line.update(address, data, state)
+        self.fifoQueue.append(self.lines.index(line))
+
+    def replace_line_in_cache(self, address, data, state):
+        index = self.fifoQueue.pop(0)
+        line_to_remove = self.lines[index]
+        address_to_remove, data_to_remove = line_to_remove.address, line_to_remove.data
+        self.lines[index] = CacheLine()
+        self.write(address, data, state)
+        return "WM", address_to_remove, data_to_remove
 
     def read(self, address, memory, cache_manager, processor_id):
         line = self.search(address)
         if line and line.state != State.INVALID:
             return line.data, "RH"
-        else:
-            data = memory.read(address)
-            is_shared = cache_manager.is_shared(address, processor_id)
-            new_state = State.SHARED if is_shared else State.EXCLUSIVE
-            self.write(address, data, new_state)
-            return data, "RM"
+        return self.handle_cache_miss(address, memory, cache_manager, processor_id)
+
+    def handle_cache_miss(self, address, memory, cache_manager, processor_id):
+        data = memory.read(address)
+        is_shared = cache_manager.is_shared(address, processor_id)
+        new_state = State.SHARED if is_shared else State.EXCLUSIVE
+        self.write(address, data, new_state)
+        return data, "RM"
 
     def update_state(self, address, new_state):
         line = self.search(address)
@@ -77,15 +84,12 @@ class Cache:
     def print_cache(self, processor_id):
         print(f"Cache do Processador {processor_id}:")
         for i, line in enumerate(self.lines):
-            state = line.state.value if line.state else "N/A"
-            print(f"Linha {i}: Endereço = {line.address}, Dado = {line.data}, Estado = {state}")
+            line.print_line(i)
         print()
 
     def is_full(self):
-        for line in self.lines:
-            if line.address is None:
-                return False
-        return True
+        return all(line.address is not None for line in self.lines)
+
 class Memory:
     def __init__(self, size):
         self.size = size
@@ -120,12 +124,11 @@ class CacheManager:
                 cache.update_state(address, State.INVALID)
 
     def is_shared(self, address, excluding_processor_id):
-        for pid, cache in self.caches.items():
-            if pid != excluding_processor_id:
-                line = cache.search(address)
-                if line and line.state in {State.SHARED, State.EXCLUSIVE, State.MODIFIED}:
-                    return True
-        return False
+        return any(self.is_line_shared(pid, address) for pid in self.caches if pid != excluding_processor_id)
+
+    def is_line_shared(self, processor_id, address):
+        line = self.caches[processor_id].search(address)
+        return line and line.state in {State.SHARED, State.EXCLUSIVE, State.MODIFIED}
 
     def update_state_to_shared(self, address, excluding_processor_id):
         for pid, cache in self.caches.items():
@@ -135,34 +138,54 @@ class CacheManager:
                     line.state = State.SHARED
 
     def handle_read(self, processor_id, address, memory):
+        # Verificar se o dado está presente em qualquer cache
         for pid, cache in self.caches.items():
             line = cache.search(address)
             if line and line.state != State.INVALID:
-                if line.state == State.MODIFIED and pid != processor_id:
-                    if self.caches[processor_id].is_full():
-                        memory.write(address, line.data)
-                    self.update_state_to_shared(address, processor_id)
-                    self.caches[processor_id].write(address, line.data, State.SHARED)
-                    line.state = State.SHARED
-                    return line.data, "RH"
-                if line.state == State.EXCLUSIVE and pid != processor_id:
-                    if self.caches[processor_id].is_full():
-                        memory.write(address, line.data)
-                    self.update_state_to_shared(address, processor_id)
-                    self.caches[processor_id].write(address, line.data, State.SHARED)
-                    return line.data, "RH"
-        data, transaction = self.caches[processor_id].read(address, memory, self, processor_id)
-        return data, transaction
+                # Dado encontrado em outra cache
+                print(f"Processador {processor_id} lê o endereço {address} com dado {line.data} ({'RH'})")
+                return line.data, 'RH'
+
+        # Cache Miss: Read from memory and update all caches
+        data = memory.read(address)
+        is_shared = self.is_shared(address, processor_id)
+
+        # Atualizar todos os caches com o novo estado
+        new_state = State.SHARED if is_shared else State.EXCLUSIVE
+        for cache in self.caches.values():
+            cache.write(address, data, new_state)
+        self.update_state_to_shared(address, processor_id)
+
+        print(f"Processador {processor_id} lê o endereço {address} com dado {data} ({'RM'})")
+        return data, 'RM'
+
+    def is_line_modified_or_exclusive(self, processor_id, address):
+        return any(self.check_and_handle_modified_exclusive(pid, processor_id, address) for pid in self.caches if pid != processor_id)
+
+    def check_and_handle_modified_exclusive(self, current_pid, request_pid, address):
+        line = self.caches[current_pid].search(address)
+        if line and line.state in {State.MODIFIED, State.EXCLUSIVE}:
+            self.handle_state_update(current_pid, request_pid, address, line)
+            return True
+        return False
+
+    def handle_state_update(self, request_pid, address, line):
+        if self.caches[request_pid].is_full():
+            self.memory.write(address, line.data)
+        self.update_state_to_shared(address, request_pid)
+        self.caches[request_pid].write(address, line.data, State.SHARED)
+        line.state = State.SHARED
 
     def handle_write(self, processor_id, address, data, memory):
         self.invalidate_other_caches(address, processor_id)
         cache = self.get_cache(processor_id)
         transaction, old_address, old_data = cache.write(address, data, State.MODIFIED)
         if data == 0:
-             memory.write(address, data)
+            memory.write(address, data)
         if transaction == 'WM' and old_address is not None and old_data is not None:
             memory.write(old_address, old_data)
         return transaction
+
 
 class Processor:
     def __init__(self, id, cache_size, memory, cache_manager):
@@ -216,20 +239,6 @@ class Processor:
         """
         self.cache.print_cache(self.id)
 
-def memoTamanho():
-    tamanho = int(input("Digite o tamanho da memória (minimo 50): "))
-    if tamanho < 50:
-        print("Tamanho inválido, digite novamente")
-        memoTamanho()
-    return tamanho
-
-def cacheTamanho():
-    tamanho = int(input("Digite o tamanho da cache (minimo 5): "))
-    if tamanho < 5:
-        print("Tamanho inválido, digite novamente")
-        cacheTamanho()
-    return tamanho
-
 class Car:
     def __init__(self, id):
         self.id = id
@@ -239,6 +248,12 @@ class ParkingSlot:
     def __init__(self, id):
         self.id = id
         self.occupied_by = None
+    
+    def is_occupied(self):
+        return self.occupied_by is not None
+
+    def is_occupied_by(self, car_id):
+        return self.occupied_by and self.occupied_by.id == car_id
 
 class ParkingLot:
     def __init__(self, size):
@@ -255,6 +270,12 @@ class ParkingLot:
             if slot.occupied_by and slot.occupied_by.id == car_id:
                 return True
         return False
+    
+    def is_slot_free(self, slot_id):
+        return not self.slots[slot_id].is_occupied()
+    
+    def is_slot_occupied_by_car(self, slot_id, car_id):
+        return self.slots[slot_id].is_occupied_by(car_id)
 
 class ParkingManager:
     def __init__(self, parking_lot, cache_manager):
@@ -262,78 +283,77 @@ class ParkingManager:
         self.cache_manager = cache_manager
 
     def park_car(self, processor_id, car_id, slot_id):
+        if self.parking_lot.is_slot_occupied_by_car(slot_id, car_id):
+            return self.print_error(f"Erro: Carro {car_id} já está estacionado em outra vaga")
+
+        if not self.parking_lot.is_slot_free(slot_id):
+            return self.print_error(f"Erro: Vaga {slot_id} já está ocupada")
+
+        self.perform_park_car(processor_id, car_id, slot_id)
+
+    def perform_park_car(self, processor_id, car_id, slot_id):
         car = Car(car_id)
         car.processor_id = processor_id
-
-        if self.parking_lot.is_car_parked(car_id):
-            print(f"Erro: Carro {car_id} já está estacionado em outra vaga")
-            return
-
-        slot = self.parking_lot.slots[slot_id]
-
-        if slot.occupied_by:
-            print(f"Erro: Vaga {slot_id} já está ocupada por Carro {slot.occupied_by.id}")
-            return
-
         slot_address = slot_id
         transaction = self.cache_manager.handle_write(processor_id, slot_address, car.id, self.cache_manager.memory)
-        
-        if transaction == "WH":
-            print(f"Write Hit: Carro {car_id} estacionado na Vaga {slot_id} pelo Processador {processor_id}")
-        elif transaction == "WM":
-            print(f"Write Miss: Carro {car_id} estacionado na Vaga {slot_id} pelo Processador {processor_id}")
 
-        slot.occupied_by = car
+        self.log_transaction(transaction, car_id, slot_id, processor_id)
+        self.parking_lot.slots[slot_id].occupied_by = car
 
     def remove_car(self, processor_id, slot_id):
         slot = self.parking_lot.slots[slot_id]
-
-        if not slot.occupied_by:
-            print(f"Erro: Vaga {slot_id} já está livre")
-            return
-
-        if slot.occupied_by.processor_id != processor_id:
-            print(f"Erro: Somente o Processador {slot.occupied_by.processor_id} pode remover o Carro {slot.occupied_by.id}")
-            return
-
-        slot_address = slot_id
-        self.cache_manager.handle_write(processor_id, slot_address, 0, self.cache_manager.memory)
-        slot.occupied_by = None
-
-    def check_slot(self, processor_id, slot_id, memory):
-        slot_address = slot_id
-        car_id, transaction = self.cache_manager.handle_read(processor_id, slot_address, memory)
-        status = f"Ocupada por Carro {car_id}" if car_id else "Vaga Livre"
-        print(f"Processador {processor_id} consulta Vaga {slot_id}: {status} ({transaction})")
-    
-    def move_car(self, processor_id, car_id, new_slot_id):
-        current_slot = None
-        for slot in self.parking_lot.slots:
-            if slot.occupied_by and slot.occupied_by.id == car_id:
-                current_slot = slot
-                break
+        if slot.is_occupied():
+            if slot.occupied_by.processor_id == processor_id:
+                self.perform_remove_car(processor_id, slot_id)
+            else:
+                return self.print_error(f"Erro: Somente o Processador {slot.occupied_by.processor_id} pode remover o Carro {slot.occupied_by.id}")
+        else:
+            return self.print_error(f"Erro: Vaga {slot_id} já está livre")
         
-        if not current_slot:
-            print(f"Erro: Carro {car_id} não está estacionado")
-            return
-        
-        if current_slot.occupied_by.processor_id != processor_id:
-            print(f"Erro: Somente o Processador {current_slot.occupied_by.processor_id} pode mover o Carro {car_id}")
-            return
+    def perform_remove_car(self, processor_id, slot_id):
+        self.cache_manager.handle_write(processor_id, slot_id, 0, self.cache_manager.memory)
+        self.parking_lot.slots[slot_id].occupied_by = None
 
-        new_slot = self.parking_lot.slots[new_slot_id]
+    def check_slot(self, processor_id, slot_id):
+        car_id, transaction = self.cache_manager.handle_read(processor_id, slot_id, self.cache_manager.memory)
+        status = f"Ocupada por Carro {car_id}" if car_id != 0 else "Livre"
+        print(f"Vaga {slot_id} está {status}")
 
-        if new_slot.occupied_by:
-            print(f"Erro: Vaga {new_slot_id} já está ocupada por Carro {new_slot.occupied_by.id}")
-            return
+    def move_car(self, processor_id, from_slot_id, to_slot_id):
+        car = self.parking_lot.slots[from_slot_id].occupied_by
+        if not car:
+            return self.print_error(f"Erro: Vaga {from_slot_id} está livre")
+        if self.parking_lot.slots[to_slot_id].occupied_by:
+            return self.print_error(f"Erro: Vaga {to_slot_id} já está ocupada")
 
-        self.remove_car(processor_id, current_slot.id)
-        self.park_car(processor_id, car_id, new_slot_id)
+        self.remove_car(processor_id, from_slot_id)
+        self.park_car(processor_id, car.id, to_slot_id)
+
+    def log_transaction(self, transaction, car_id, slot_id, processor_id):
+        if transaction == 'WH':
+            print(f"Carro {car_id} estacionado na Vaga {slot_id} pelo Processador {processor_id} - WH")
+        elif transaction == 'WM':
+            print(f"Carro {car_id} estacionado na Vaga {slot_id} pelo Processador {processor_id} - WM")
+
+    def print_error(self, message):
+        print(message)
+
+def get_size(prompt, min_size):
+    tamanho = int(input(f"{prompt} (minimo {min_size}): "))
+    if tamanho < min_size:
+        print("Tamanho inválido, digite novamente")
+        return get_size(prompt, min_size)
+    return tamanho
+
+def get_memory_size():
+    return get_size("Digite o tamanho da memória", 50)
+
+def get_cache_size():
+    return get_size("Digite o tamanho da cache", 5)
 
 def test():
-
-    tamanho_memoria = memoTamanho()
-    tamanho_cache = cacheTamanho()
+    tamanho_memoria = get_memory_size()
+    tamanho_cache = get_cache_size()
     
     memory = Memory(tamanho_memoria)
     cache_manager = CacheManager(memory)
@@ -345,31 +365,40 @@ def test():
 
     processors = [processor1, processor2, processor3]
 
-    parking_lot = ParkingLot(tamanho_memoria)
+    parking_lot = ParkingLot(10)  # Tamanho do estacionamento
     parking_manager = ParkingManager(parking_lot, cache_manager)
 
+    print("Estado inicial do estacionamento:")
     parking_lot.print_slots()
 
+    # Estacionar carros
+    print("\nEstacionando carros:")
     parking_manager.park_car(1, 101, 1)
-    parking_manager.park_car(2,102,2)
-    parking_manager.park_car(3,103,3)
-    parking_manager.check_slot(1, 2,memory)
-    parking_manager.check_slot(1, 10,memory)
-    # parking_manager.park_car(1, 102, 2)
-    # parking_manager.park_car(1, 103, 3)    
-    # parking_manager.park_car(1, 104, 4)
+    parking_manager.park_car(2, 102, 2)
+    parking_manager.park_car(1, 103, 3)
+    parking_manager.park_car(1, 104, 4)
     processor1.print_cache()
     memory.print_memory()
-    # parking_manager.move_car(1, 101, 9)
-    # parking_manager.park_car(1, 105, 5)
-    # parking_manager.remove_car(1, 1)
-    # parking_manager.park_car(2, 222,1)
+    
+    #Tentar mover um carro (opcional)
+    parking_manager.move_car(1, 1, 9)
+    parking_manager.check_slot(1, 1)
+    parking_manager.check_slot(2, 41)
 
+    # Estacionar mais um carro
+    parking_manager.park_car(1, 105, 5)
 
+    # Remover um carro
+    parking_manager.remove_car(1, 1)
+
+    # Estacionar um carro com outro processador
+    parking_manager.park_car(2, 222, 1)
+
+    # Imprimir o estado final das caches e da memória principal
     for p in processors:
         p.print_cache()
 
-    memory.print_memory()
+    # memory.print_memory()
     parking_lot.print_slots()
 
 def main():
@@ -377,3 +406,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
