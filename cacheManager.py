@@ -1,98 +1,29 @@
-from cache import State
+from cache import CacheLine, State
 
 class CacheManager:
-    """
-    Gerenciador de Cache.
-
-    Esta classe é responsável por gerenciar múltiplos caches associados a diferentes processadores.
-    Ela fornece métodos para registrar caches, obter caches, invalidar caches, verificar se um dado está compartilhado,
-    atualizar o estado para compartilhado, lidar com leituras e lidar com escritas.
-
-    Atributos:
-        caches (dict): Um dicionário que mapeia o ID do processador para o cache correspondente.
-
-    Métodos:
-        register_cache(processor_id, cache): Registra um cache associado a um processador.
-        get_cache(processor_id): Retorna o cache associado a um processador.
-        invalidate_other_caches(address, excluding_processor_id): Invalida os caches, exceto o cache do processador especificado.
-        is_shared(address, excluding_processor_id): Verifica se um dado está compartilhado entre os caches, excluindo o cache do processador especificado.
-        update_state_to_shared(address, excluding_processor_id): Atualiza o estado de um dado para compartilhado em todos os caches, excluindo o cache do processador especificado.
-        handle_read(processor_id, address, memory): Lida com uma operação de leitura de um dado em um processador específico.
-        handle_write(processor_id, address, data, memory): Lida com uma operação de escrita de um dado em um processador específico.
-    """
-
-    def __init__(self):
+    def __init__(self, memory):
         self.caches = {}
+        self.memory = memory
 
     def register_cache(self, processor_id, cache):
-        """
-        Registra um cache associado a um processador.
-
-        Args:
-            processor_id (int): O ID do processador.
-            cache (Cache): O cache a ser registrado.
-
-        Returns:
-            None
-        """
         self.caches[processor_id] = cache
 
     def get_cache(self, processor_id):
-        """
-        Retorna o cache associado a um processador.
-
-        Args:
-            processor_id (int): O ID do processador.
-
-        Returns:
-            Cache: O cache associado ao processador.
-        """
         return self.caches.get(processor_id)
 
     def invalidate_other_caches(self, address, excluding_processor_id):
-        """
-        Invalida os caches, exceto o cache do processador especificado.
-
-        Args:
-            address (int): O endereço do dado a ser invalidado.
-            excluding_processor_id (int): O ID do processador cujo cache não deve ser invalidado.
-
-        Returns:
-            None
-        """
         for pid, cache in self.caches.items():
             if pid != excluding_processor_id:
                 cache.update_state(address, State.INVALID)
 
     def is_shared(self, address, excluding_processor_id):
-        """
-        Verifica se um dado está compartilhado entre os caches, excluindo o cache do processador especificado.
+        return any(self.is_line_shared(pid, address) for pid in self.caches if pid != excluding_processor_id)
 
-        Args:
-            address (int): O endereço do dado a ser verificado.
-            excluding_processor_id (int): O ID do processador cujo cache não deve ser considerado.
-
-        Returns:
-            bool: True se o dado está compartilhado, False caso contrário.
-        """
-        for pid, cache in self.caches.items():
-            if pid != excluding_processor_id:
-                line = cache.search(address)
-                if line and line.state in {State.SHARED, State.EXCLUSIVE, State.MODIFIED}:
-                    return True
-        return False
+    def is_line_shared(self, processor_id, address):
+        line = self.caches[processor_id].search(address)
+        return line and line.state in {State.SHARED, State.EXCLUSIVE, State.MODIFIED}
 
     def update_state_to_shared(self, address, excluding_processor_id):
-        """
-        Atualiza o estado de um dado para compartilhado em todos os caches, excluindo o cache do processador especificado.
-
-        Args:
-            address (int): O endereço do dado a ser atualizado.
-            excluding_processor_id (int): O ID do processador cujo cache não deve ser atualizado.
-
-        Returns:
-            None
-        """
         for pid, cache in self.caches.items():
             if pid != excluding_processor_id:
                 line = cache.search(address)
@@ -100,54 +31,67 @@ class CacheManager:
                     line.state = State.SHARED
 
     def handle_read(self, processor_id, address, memory):
-        """
-        Lida com uma operação de leitura de um dado em um processador específico.
 
-        Args:
-            processor_id (int): O ID do processador.
-            address (int): O endereço do dado a ser lido.
-            memory (Memory): A memória principal.
+        def update_all_caches(self, address, data, processor_id):
+            is_shared = self.is_shared(address, processor_id)
+            new_state = State.SHARED if is_shared else State.EXCLUSIVE
+            state, add_to_memory, data_to_memory = self.caches[processor_id].write(address, data, new_state)
+            for cache in self.caches.values():
+                if cache.search(address):
+                    cache.update_state(address, new_state)
+            self.update_state_to_shared(address, processor_id)
 
-        Returns:
-            tuple: Uma tupla contendo o dado lido e a transação realizada.
-        """
+            if add_to_memory is not None and data_to_memory is not None:
+                memory.write(add_to_memory, data_to_memory)
+
+        # Verificar se o dado está presente em qualquer cache
         for pid, cache in self.caches.items():
             line = cache.search(address)
             if line and line.state != State.INVALID:
-                if line.state == State.MODIFIED and pid != processor_id:
-                    # Escreve os dados modificados na memória
-                    memory.write(address, line.data)
-                    # Atualiza o estado para compartilhado
-                    self.update_state_to_shared(address, processor_id)
-                    # Escreve os dados no cache do processador solicitante
-                    self.caches[processor_id].write(address, line.data, State.SHARED)
-                    # Atualiza o estado do cache que respondeu para compartilhado
-                    line.state = State.SHARED
-                    return line.data, "RH"
-                if line.state == State.EXCLUSIVE and pid != processor_id:
-                    self.update_state_to_shared(address, processor_id)
-                    self.caches[processor_id].write(address, line.data, State.SHARED)
-                    return line.data, "RH"
-        # Se nenhum cache possui o dado, lê da memória
-        data, transaction = self.caches[processor_id].read(address, memory, self, processor_id)
-        return data, transaction
+                # Dado encontrado em outra cache
+                print(f"Processador {processor_id} lê o endereço {address} com dado {line.data} ({'RH'})")
+                if self.caches[processor_id].update_state(address, State.SHARED) != True:
+                    state, add_to_memory, data_to_memory = self.caches[processor_id].write(address, line.data, State.SHARED)
+                    if add_to_memory is not None and data_to_memory is not None:
+                        memory.write(add_to_memory, data_to_memory)
+                update_all_caches(self, address, line.data, processor_id)
+                return line.data, 'RH'
+
+        # Cache Miss: Read from memory and update all caches
+        data = memory.read(address)
+        is_shared = self.is_shared(address, processor_id)
+
+        update_all_caches(self, address, data, processor_id)
+
+        # Atualizar todos os caches com o novo estado
+
+        print(f"Processador {processor_id} lê o endereço {address} com dado {data} ({'RM'})")
+        return data, 'RM'
+
+    def is_line_modified_or_exclusive(self, processor_id, address):
+        return any(self.check_and_handle_modified_exclusive(pid, processor_id, address) for pid in self.caches if pid != processor_id)
+
+    def check_and_handle_modified_exclusive(self, current_pid, request_pid, address):
+        line = self.caches[current_pid].search(address)
+        if line and line.state in {State.MODIFIED, State.EXCLUSIVE}:
+            self.handle_state_update(current_pid, request_pid, address, line)
+            return True
+        return False
+
+    def handle_state_update(self, request_pid, address, line):
+        if self.caches[request_pid].is_full():
+            self.memory.write(address, line.data)
+        self.update_state_to_shared(address, request_pid)
+        self.caches[request_pid].write(address, line.data, State.SHARED)
+        line.state = State.SHARED
 
     def handle_write(self, processor_id, address, data, memory):
-        """
-        Lida com uma operação de escrita de um dado em um processador específico.
-
-        Args:
-            processor_id (int): O ID do processador.
-            address (int): O endereço do dado a ser escrito.
-            data: Os dados a serem escritos.
-            memory (Memory): A memória principal.
-
-        Returns:
-            str: A transação realizada.
-        """
         self.invalidate_other_caches(address, processor_id)
         cache = self.get_cache(processor_id)
         transaction, old_address, old_data = cache.write(address, data, State.MODIFIED)
+        if data == 0:
+            memory.write(address, data)
         if transaction == 'WM' and old_address is not None and old_data is not None:
             memory.write(old_address, old_data)
         return transaction
+

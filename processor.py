@@ -52,3 +52,4 @@ class Processor:
 
         """
         self.cache.print_cache(self.id)
+

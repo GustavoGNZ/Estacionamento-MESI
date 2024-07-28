@@ -1,0 +1,100 @@
+
+
+class Car:
+    def __init__(self, id):
+        self.id = id
+        self.processor_id = None
+
+class ParkingSlot:
+    def __init__(self, id):
+        self.id = id
+        self.occupied_by = None
+    
+    def is_occupied(self):
+        return self.occupied_by is not None
+
+    def is_occupied_by(self, car_id):
+        return self.occupied_by and self.occupied_by.id == car_id
+
+class ParkingLot:
+    def __init__(self, size):
+        self.slots = [ParkingSlot(i) for i in range(size)]
+
+    def print_slots(self):
+        print("Estado das Vagas:")
+        for slot in self.slots:
+            status = f"Ocupada por Carro {slot.occupied_by.id}" if slot.occupied_by else "Vaga Livre"
+            print(f"Vaga {slot.id}: {status}")
+
+    def is_car_parked(self, car_id):
+        for slot in self.slots:
+            if slot.occupied_by and slot.occupied_by.id == car_id:
+                return True
+        return False
+    
+    def is_slot_free(self, slot_id):
+        return not self.slots[slot_id].is_occupied()
+    
+    def is_slot_occupied_by_car(self, slot_id, car_id):
+        return self.slots[slot_id].is_occupied_by(car_id)
+
+class ParkingManager:
+    def __init__(self, parking_lot, cache_manager):
+        self.parking_lot = parking_lot
+        self.cache_manager = cache_manager
+
+    def park_car(self, processor_id, car_id, slot_id):
+        if self.parking_lot.is_slot_occupied_by_car(slot_id, car_id):
+            return self.print_error(f"Erro: Carro {car_id} já está estacionado em outra vaga")
+
+        if not self.parking_lot.is_slot_free(slot_id):
+            return self.print_error(f"Erro: Vaga {slot_id} já está ocupada")
+
+        self.perform_park_car(processor_id, car_id, slot_id)
+
+    def perform_park_car(self, processor_id, car_id, slot_id):
+        car = Car(car_id)
+        car.processor_id = processor_id
+        slot_address = slot_id
+        transaction = self.cache_manager.handle_write(processor_id, slot_address, car.id, self.cache_manager.memory)
+
+        self.log_transaction(transaction, car_id, slot_id, processor_id)
+        self.parking_lot.slots[slot_id].occupied_by = car
+
+    def remove_car(self, processor_id, slot_id):
+        slot = self.parking_lot.slots[slot_id]
+        if slot.is_occupied():
+            if slot.occupied_by.processor_id == processor_id:
+                self.perform_remove_car(processor_id, slot_id)
+            else:
+                return self.print_error(f"Erro: Somente o Processador {slot.occupied_by.processor_id} pode remover o Carro {slot.occupied_by.id}")
+        else:
+            return self.print_error(f"Erro: Vaga {slot_id} já está livre")
+        
+    def perform_remove_car(self, processor_id, slot_id):
+        self.cache_manager.handle_write(processor_id, slot_id, 0, self.cache_manager.memory)
+        self.parking_lot.slots[slot_id].occupied_by = None
+
+    def check_slot(self, processor_id, slot_id):
+        car_id, transaction = self.cache_manager.handle_read(processor_id, slot_id, self.cache_manager.memory)
+        status = f"Ocupada por Carro {car_id}" if car_id != 0 else "Livre"
+        print(f"Vaga {slot_id} está {status}")
+
+    def move_car(self, processor_id, from_slot_id, to_slot_id):
+        car = self.parking_lot.slots[from_slot_id].occupied_by
+        if not car:
+            return self.print_error(f"Erro: Vaga {from_slot_id} está livre")
+        if self.parking_lot.slots[to_slot_id].occupied_by:
+            return self.print_error(f"Erro: Vaga {to_slot_id} já está ocupada")
+
+        self.remove_car(processor_id, from_slot_id)
+        self.park_car(processor_id, car.id, to_slot_id)
+
+    def log_transaction(self, transaction, car_id, slot_id, processor_id):
+        if transaction == 'WH':
+            print(f"Carro {car_id} estacionado na Vaga {slot_id} pelo Processador {processor_id} - WH")
+        elif transaction == 'WM':
+            print(f"Carro {car_id} estacionado na Vaga {slot_id} pelo Processador {processor_id} - WM")
+
+    def print_error(self, message):
+        print(message)
