@@ -23,7 +23,7 @@ class CacheManager:
         line = self.caches[processor_id].search(address)
         return line and line.state in {State.SHARED, State.EXCLUSIVE, State.MODIFIED}
 
-    def update_state_to_shared(self, address, excluding_processor_id):
+    def update_state_to_shared_if_exclusive(self, address, excluding_processor_id):
         for pid, cache in self.caches.items():
             if pid != excluding_processor_id:
                 line = cache.search(address)
@@ -39,7 +39,7 @@ class CacheManager:
             for cache in self.caches.values():
                 if cache.search(address):
                     cache.update_state(address, new_state)
-            self.update_state_to_shared(address, processor_id)
+            self.update_state_to_shared_if_exclusive(address, processor_id)
 
             if add_to_memory is not None and data_to_memory is not None:
                 memory.write(add_to_memory, data_to_memory)
@@ -67,23 +67,6 @@ class CacheManager:
 
         print(f"Processador {processor_id} lê o endereço {address} com dado {data} ({'RM'})")
         return data, 'RM'
-
-    def is_line_modified_or_exclusive(self, processor_id, address):
-        return any(self.check_and_handle_modified_exclusive(pid, processor_id, address) for pid in self.caches if pid != processor_id)
-
-    def check_and_handle_modified_exclusive(self, current_pid, request_pid, address):
-        line = self.caches[current_pid].search(address)
-        if line and line.state in {State.MODIFIED, State.EXCLUSIVE}:
-            self.handle_state_update(current_pid, request_pid, address, line)
-            return True
-        return False
-
-    def handle_state_update(self, request_pid, address, line):
-        if self.caches[request_pid].is_full():
-            self.memory.write(address, line.data)
-        self.update_state_to_shared(address, request_pid)
-        self.caches[request_pid].write(address, line.data, State.SHARED)
-        line.state = State.SHARED
 
     def handle_write(self, processor_id, address, data, memory):
         self.invalidate_other_caches(address, processor_id)

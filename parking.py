@@ -21,10 +21,11 @@ class ParkingLot:
         self.slots = [ParkingSlot(i) for i in range(size)]
 
     def print_slots(self):
-        print("Estado das Vagas:")
+        status = "Estado das Vagas:\n"
         for slot in self.slots:
-            status = f"Ocupada por Carro {slot.occupied_by.id}" if slot.occupied_by else "Vaga Livre"
-            print(f"Vaga {slot.id}: {status}")
+            car_id = slot.occupied_by.id if slot.occupied_by else "Nenhum"
+            status += f"Vaga {slot.id}: Ocupada por Carro {car_id}\n" if slot.occupied_by else f"Vaga {slot.id}: Vaga Livre\n"
+        return status
 
     def is_car_parked(self, car_id):
         for slot in self.slots:
@@ -44,13 +45,17 @@ class ParkingManager:
         self.cache_manager = cache_manager
 
     def park_car(self, processor_id, car_id, slot_id):
+        texto = ""
         if self.parking_lot.is_slot_occupied_by_car(slot_id, car_id):
-            return self.print_error(f"Erro: Carro {car_id} já está estacionado em outra vaga")
+            texto = (f"Erro: Carro {car_id} já está estacionado em outra vaga")
+            
 
         if not self.parking_lot.is_slot_free(slot_id):
-            return self.print_error(f"Erro: Vaga {slot_id} já está ocupada")
+            texto = (f"Erro: Vaga {slot_id} já está ocupada")
+            
 
         self.perform_park_car(processor_id, car_id, slot_id)
+        return texto
 
     def perform_park_car(self, processor_id, car_id, slot_id):
         car = Car(car_id)
@@ -58,7 +63,6 @@ class ParkingManager:
         slot_address = slot_id
         transaction = self.cache_manager.handle_write(processor_id, slot_address, car.id, self.cache_manager.memory)
 
-        self.log_transaction(transaction, car_id, slot_id, processor_id)
         self.parking_lot.slots[slot_id].occupied_by = car
 
     def remove_car(self, processor_id, slot_id):
@@ -67,9 +71,11 @@ class ParkingManager:
             if slot.occupied_by.processor_id == processor_id:
                 self.perform_remove_car(processor_id, slot_id)
             else:
-                return self.print_error(f"Erro: Somente o Processador {slot.occupied_by.processor_id} pode remover o Carro {slot.occupied_by.id}")
+                texto = (f"Erro: Somente o Processador {slot.occupied_by.processor_id} pode remover o Carro {slot.occupied_by.id}")
+                return texto
         else:
-            return self.print_error(f"Erro: Vaga {slot_id} já está livre")
+            texto = (f"Erro: Vaga {slot_id} já está livre")
+            return texto
         
     def perform_remove_car(self, processor_id, slot_id):
         self.cache_manager.handle_write(processor_id, slot_id, 0, self.cache_manager.memory)
@@ -78,23 +84,26 @@ class ParkingManager:
     def check_slot(self, processor_id, slot_id):
         car_id, transaction = self.cache_manager.handle_read(processor_id, slot_id, self.cache_manager.memory)
         status = f"Ocupada por Carro {car_id}" if car_id != 0 else "Livre"
-        print(f"Vaga {slot_id} está {status}")
+        texto = (f"Vaga {slot_id} está {status}")
+        return texto
+
 
     def move_car(self, processor_id, from_slot_id, to_slot_id):
         car = self.parking_lot.slots[from_slot_id].occupied_by
         if not car:
-            return self.print_error(f"Erro: Vaga {from_slot_id} está livre")
+            texto = (f"Erro: Vaga {from_slot_id} está livre")
+            return texto
         if self.parking_lot.slots[to_slot_id].occupied_by:
-            return self.print_error(f"Erro: Vaga {to_slot_id} já está ocupada")
+            texto = (f"Erro: Vaga {to_slot_id} já está ocupada")
+            return texto
 
         self.remove_car(processor_id, from_slot_id)
         self.park_car(processor_id, car.id, to_slot_id)
 
     def log_transaction(self, transaction, car_id, slot_id, processor_id):
         if transaction == 'WH':
-            print(f"Carro {car_id} estacionado na Vaga {slot_id} pelo Processador {processor_id} - WH")
+            texto = (f"Carro {car_id} estacionado na Vaga {slot_id} pelo Processador {processor_id} - WH")
+            return texto
         elif transaction == 'WM':
-            print(f"Carro {car_id} estacionado na Vaga {slot_id} pelo Processador {processor_id} - WM")
-
-    def print_error(self, message):
-        print(message)
+            texto = (f"Carro {car_id} estacionado na Vaga {slot_id} pelo Processador {processor_id} - WM")
+            return texto
