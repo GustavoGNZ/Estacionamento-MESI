@@ -33,31 +33,31 @@ class ParkingApp:
         self.processor_label.grid(row=0, column=0, columnspan=2, pady=5)
 
         self.select_processor_button = ttk.Button(self.root, text="Selecionar Processador", command=self.select_processor)
-        self.select_processor_button.grid(row=1, column=0, columnspan=2, pady=5)
+        self.select_processor_button.grid(row=1, column=0, columnspan=2, pady=5,sticky=tk.W)
 
         self.check_slot_button = ttk.Button(self.root, text="Verificar Vagas (Leitura)", command=self.check_slot)
-        self.check_slot_button.grid(row=2, column=0, columnspan=2, pady=5)
+        self.check_slot_button.grid(row=2, column=0, columnspan=2, pady=5,sticky=tk.W)
 
         self.park_car_button = ttk.Button(self.root, text="Estacionar Carro (Escrita)", command=self.park_car)
-        self.park_car_button.grid(row=3, column=0, columnspan=2, pady=5)
+        self.park_car_button.grid(row=3, column=0, columnspan=2, pady=5,sticky=tk.W)
 
         self.remove_car_button = ttk.Button(self.root, text="Remover Carro (Escrita)", command=self.remove_car)
-        self.remove_car_button.grid(row=4, column=0, columnspan=2, pady=5)
+        self.remove_car_button.grid(row=4, column=0, columnspan=2, pady=5,sticky=tk.W)
 
         self.move_car_button = ttk.Button(self.root, text="Mudar Carro de Vaga (Escrita)", command=self.move_car)
-        self.move_car_button.grid(row=5, column=0, columnspan=2, pady=5)
+        self.move_car_button.grid(row=5, column=0, columnspan=2, pady=5,sticky=tk.W)
 
         self.show_status_button = ttk.Button(self.root, text="Mostrar estado da cache e da memória", command=self.show_status)
-        self.show_status_button.grid(row=6, column=0, columnspan=2, pady=5)
+        self.show_status_button.grid(row=6, column=0, columnspan=2, pady=5,sticky=tk.W)
 
         self.show_parking_slots_button = ttk.Button(self.root, text="Mostrar Vagas do Estacionamento", command=self.show_parking_slots)
-        self.show_parking_slots_button.grid(row=7, column=0, columnspan=2, pady=5)
+        self.show_parking_slots_button.grid(row=7, column=0, columnspan=2, pady=5,sticky=tk.W)
 
         self.clear_output_button = ttk.Button(self.root, text="Limpar Entrada de Texto", command=self.clear_output)
-        self.clear_output_button.grid(row=8, column=0, columnspan=2, pady=5)
+        self.clear_output_button.grid(row=8, column=0, columnspan=2, pady=5,sticky=tk.W)
 
         self.quit_button = ttk.Button(self.root, text="Sair", command=self.root.quit)
-        self.quit_button.grid(row=9, column=0, columnspan=2, pady=5)
+        self.quit_button.grid(row=9, column=0, columnspan=2, pady=5,sticky=tk.W)
 
         self.output_text = tk.Text(self.root, wrap="word", height=15, width=60)
         self.output_text.grid(row=10, column=0, columnspan=2, pady=5, padx=5)
