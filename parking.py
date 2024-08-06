@@ -54,7 +54,8 @@ class ParkingManager:
             texto = (f"Erro: Vaga {slot_id} já está ocupada")
             
 
-        self.perform_park_car(processor_id, car_id, slot_id)
+        transaction = self.perform_park_car(processor_id, car_id, slot_id)
+        texto = (f"Carro {car_id} estacionado na Vaga {slot_id} pelo Processador {processor_id}  {transaction}")
         return texto
 
     def perform_park_car(self, processor_id, car_id, slot_id):
@@ -64,27 +65,31 @@ class ParkingManager:
         transaction = self.cache_manager.handle_write(processor_id, slot_address, car.id, self.cache_manager.memory)
 
         self.parking_lot.slots[slot_id].occupied_by = car
+        return transaction
 
     def remove_car(self, processor_id, slot_id):
         slot = self.parking_lot.slots[slot_id]
         if slot.is_occupied():
             if slot.occupied_by.processor_id == processor_id:
-                self.perform_remove_car(processor_id, slot_id)
+                texto = self.perform_remove_car(processor_id, slot_id)
             else:
                 texto = (f"Erro: Somente o Processador {slot.occupied_by.processor_id} pode remover o Carro {slot.occupied_by.id}")
                 return texto
         else:
             texto = (f"Erro: Vaga {slot_id} já está livre")
-            return texto
+        
+        return texto
         
     def perform_remove_car(self, processor_id, slot_id):
-        self.cache_manager.handle_write(processor_id, slot_id, 0, self.cache_manager.memory)
+        transaction = self.cache_manager.handle_write(processor_id, slot_id, 0, self.cache_manager.memory)
         self.parking_lot.slots[slot_id].occupied_by = None
+        texto = (f"Carro removido da Vaga {slot_id} pelo Processador {processor_id} - {transaction}")
+        return texto
 
     def check_slot(self, processor_id, slot_id):
         car_id, transaction = self.cache_manager.handle_read(processor_id, slot_id, self.cache_manager.memory)
         status = f"Ocupada por Carro {car_id}" if car_id != 0 else "Livre"
-        texto = (f"Vaga {slot_id} está {status}")
+        texto = (f"Vaga {slot_id} está {status} {transaction}")
         return texto
 
 
@@ -96,9 +101,14 @@ class ParkingManager:
         if self.parking_lot.slots[to_slot_id].occupied_by:
             texto = (f"Erro: Vaga {to_slot_id} já está ocupada")
             return texto
-
-        self.remove_car(processor_id, from_slot_id)
-        self.park_car(processor_id, car.id, to_slot_id)
+        if car.processor_id == processor_id:
+            self.remove_car(processor_id, from_slot_id)
+            self.park_car(processor_id, car.id, to_slot_id)
+            return "Carro alterado de vaga"
+        
+        texto = (f"Erro: Somente o Processador {self.parking_lot.slots[from_slot_id].occupied_by.processor_id} pode remover o Carro {self.parking_lot.slots[from_slot_id].occupied_by.id}")
+        return texto
+        
 
     def log_transaction(self, transaction, car_id, slot_id, processor_id):
         if transaction == 'WH':
