@@ -46,12 +46,14 @@ class ParkingManager:
 
     def park_car(self, processor_id, car_id, slot_id):
         texto = ""
-        if self.parking_lot.is_slot_occupied_by_car(slot_id, car_id):
+        if self.parking_lot.is_car_parked(car_id):
             texto = (f"Erro: Carro {car_id} já está estacionado em outra vaga")
+            return texto
             
 
         if not self.parking_lot.is_slot_free(slot_id):
-            texto = (f"Erro: Vaga {slot_id} já está ocupada")
+            texto = (f"Erro: Vaga {slot_id} já está ocupada pelo carro {self.parking_lot.slots[slot_id].occupied_by.id}")
+            return texto
             
 
         transaction = self.perform_park_car(processor_id, car_id, slot_id)
@@ -109,11 +111,3 @@ class ParkingManager:
         texto = (f"Erro: Somente o Processador {self.parking_lot.slots[from_slot_id].occupied_by.processor_id} pode remover o Carro {self.parking_lot.slots[from_slot_id].occupied_by.id}")
         return texto
         
-
-    def log_transaction(self, transaction, car_id, slot_id, processor_id):
-        if transaction == 'WH':
-            texto = (f"Carro {car_id} estacionado na Vaga {slot_id} pelo Processador {processor_id} - WH")
-            return texto
-        elif transaction == 'WM':
-            texto = (f"Carro {car_id} estacionado na Vaga {slot_id} pelo Processador {processor_id} - WM")
-            return texto

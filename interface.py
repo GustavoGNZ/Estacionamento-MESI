@@ -14,6 +14,9 @@ class ParkingApp:
         self.root = root
         self.root.title("Simulador de Estacionamento com Protocolo MESI")
 
+        self.root.geometry("480x580")
+        self.root.resizable(False, False)
+
         self.memory = Memory(50)
         self.cache_manager = CacheManager(self.memory)
         self.parking_lot = ParkingLot(10)
@@ -141,8 +144,3 @@ class ParkingApp:
         self.output_text.delete(1.0, tk.END)
         self.output_text.config(state=tk.DISABLED)
 
-
-if __name__ == "__main__":
-    root = tk.Tk()
-    app = ParkingApp(root)
-    root.mainloop()
