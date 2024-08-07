@@ -1,6 +1,5 @@
 import tkinter as tk
 from tkinter import ttk, messagebox, simpledialog
-from enum import Enum
 from memory import Memory
 from cacheManager import CacheManager
 from processor import Processor
